@@ -1,0 +1,115 @@
+---
+title: "Practical Machine Learning Course Project"
+author: "Brian Altman"
+date: "January 28, 2016"
+output:
+  pdf_document: default
+  html_document:
+    keep_md: yes
+---
+
+###Background
+With devices such as Jawbone Up, Nike FuelBand, and Fitbit it is possible
+to collect a large amount of data about personal activity relatively inexpensively. 
+These type of devices are part of the quantified self movement - a group of 
+enthusiasts who take measurements about themselves regularly to improve their health, 
+to find patterns in their behavior, or because they are tech geeks. One thing that
+people regularly do is quantify how much of a particular activity they do, but 
+they rarely quantify how well they do it. 
+
+In this project, your goal will be to use data from accelerometers on the 
+belt, forearm, arm, and dumbell of 6 participants. They were asked to perform 
+barbell lifts correctly and incorrectly in 5 different ways:
+
+
+* A: according to the specification 
+* B: elbows to the front
+* C: lift dumbbell only halfway 
+* D: lower dumbbell only halfway
+* E: hips to the fron
+
+Data
+The training data for this project are available here:
+      https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+The test data are available here:
+      https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+
+More information is available from the #website here: http://groupware.les.inf.puc-rio.br/har 
+(see the section on the Weight Lifting Exercise Dataset).
+
+
+####Libraries and packages
+
+```{r libraries}
+library(data.table)
+library(caret)
+#install.packages("randomForest")
+#install.packages("e1071")
+knitr::opts_chunk$set(cache=TRUE)
+```
+
+####Load data sets
+```{r load}
+pml_training <- fread("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv")
+pml_testing  <- fread("https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv")
+pml_training <- as.data.frame(pml_training)
+```
+
+####Data Preparation
+Remove any columns that have missing values
+```{r DataPrep1}
+MissingDataColumns <- sapply(pml_training, function (x) any(is.na(x) | x == " " | x == ""))
+pml_training_without_missing <- pml_training[,!MissingDataColumns]
+```
+
+Remove columns unrelated to sensors of interest
+```{r DataPrep2}
+TrainingSensorColumns <- grep(pattern = "_belt|_arm|_dumbbell|_forearm", names(pml_training_without_missing))
+pml_training_cleaned <- pml_training_without_missing[,c(TrainingSensorColumns,60)]
+pml_training_cleaned$classe <- as.factor(pml_training_cleaned$classe)
+str(pml_training_cleaned)
+```
+
+Remove values close to zero
+```{r DataPrep3}
+pml_training_cleaned_pp <-preProcess(pml_training_cleaned,method=c('center', 'scale'))
+pml_training_cleaned_pp_pr <- predict(pml_training_cleaned_pp, pml_training_cleaned)
+pml_training_cleaned_pp_pr$classe <- pml_training_cleaned$classe
+NearZeroValues <- nearZeroVar(pml_training_cleaned_pp_pr,saveMetrics=TRUE)
+pml_training_cleaned_pp_pr_z <- pml_training_cleaned_pp_pr[,NearZeroValues$nzv==FALSE]
+```
+
+####Partition the training cleaned data set into training and validation
+```{r Partition}
+pml_training_partition <- createDataPartition(pml_training_cleaned_pp_pr_z$classe, p=0.75)
+pml_training_cleaned_Train      <- pml_training_cleaned[ pml_training_partition  [[1]],]
+pml_training_cleaned_Validaton  <- pml_training_cleaned[-pml_training_partition  [[1]],]
+dim(pml_training_cleaned_Train)
+dim(pml_training_cleaned_Validaton)
+```
+
+
+####Using Random forest, train the model using the training partition
+```{r ModelTrain}
+#Sys.time()  #used to monitor progress
+#TC1 <- trainControl(method='cv', allowParallel=TRUE, number=5,verboseIter = TRUE)  #used to monitor progress
+TC1 <- trainControl(method='cv', allowParallel=TRUE, number=5)
+TrainingModel <- train(classe ~., method="rf", data=pml_training_cleaned_Train,trControl=TC1)
+TrainingModel
+#Sys.time() #used to monitor progress
+```
+
+####Determine accuracy of model
+```{r Accuracy}
+TrainingPrediction <- predict(TrainingModel, pml_training_cleaned_Train)
+confusionMatrix(TrainingPrediction, pml_training_cleaned_Train$classe)
+
+trainingPred <- predict(TrainingModel, pml_training_cleaned_Validaton)
+confusionMatrix(trainingPred, pml_training_cleaned_Validaton$classe)
+```
+
+####Based on pml_testing data, create predictions for class answers
+```{r Predictions}
+pml_testing_prediction <- predict(TrainingModel, pml_testing)
+pml_testing_prediction
+```
